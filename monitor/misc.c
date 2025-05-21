@@ -424,6 +424,15 @@ static void hmp_cheri_log_buffer(Monitor *mon, const QDict *qdict)
 #endif
 }
 
+static void hmp_cheri_log_buffer_flush(Monitor *mon, const QDict *qdict)
+{
+#if defined(CONFIG_TCG_LOG_INSTR)
+    qemu_log_instr_flush_all();
+#else
+    warn_report("The CHERI trace buffer requires CONFIG_TCG_LOG_INSTR");
+#endif
+}
+
 static void hmp_logfile(Monitor *mon, const QDict *qdict)
 {
     Error *err = NULL;

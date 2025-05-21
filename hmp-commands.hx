@@ -1745,6 +1745,11 @@ ERST
         .cmd        = hmp_calc_dirty_rate,
     },
 
+SRST
+``cheri_trace_buffer_size`` *buffer_size*
+  Set the instruction trace buffer size to the given number of entries.
+ERST
+
     {
         .name       = "cheri_trace_buffer_size",
         .args_type  = "buffer_size:i",
@@ -1754,6 +1759,14 @@ ERST
     },
 
 SRST
-``cheri_trace_buffer_size`` *buffer_size*
-  Set the instruction trace buffer size to the given number of entries..
+``cheri_trace_buffer_flush``
+  Flush the tracing buffer on all CPUs.
 ERST
+
+    {
+        .name       = "cheri_trace_buffer_flush",
+        .args_type  = "",
+        .params     = "",
+        .help       = "flush instruction trace buffer on all CPUs",
+        .cmd        = hmp_cheri_log_buffer_flush,
+    },

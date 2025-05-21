@@ -242,6 +242,7 @@ typedef struct {
 #define MIN_ENTRY_BUFFER_SIZE (1 << 16)
 
 static unsigned long reset_entry_buffer_size = MIN_ENTRY_BUFFER_SIZE;
+static unsigned long default_log_state_flags = 0;
 
 /*
  * Fetch the log state for a cpu.
@@ -1021,6 +1022,7 @@ void qemu_log_instr_init(CPUState *cpu)
 
     cpulog->loglevel = QEMU_LOG_INSTR_LOGLEVEL_NONE;
     cpulog->loglevel_active = false;
+    cpulog->flags = default_log_state_flags;
     cpulog->instr_info = iinfo_ring;
     cpulog->ring_head = 0;
     cpulog->ring_tail = 0;
@@ -1080,6 +1082,15 @@ void qemu_log_instr_set_buffer_size(unsigned long new_size)
     CPU_FOREACH(cpu) {
         async_safe_run_on_cpu(cpu, do_log_buffer_resize,
             RUN_ON_CPU_HOST_ULONG(new_size));
+    }
+}
+
+void qemu_log_instr_set_buffered_mode(bool enable)
+{
+    if (enable) {
+        default_log_state_flags |= QEMU_LOG_INSTR_FLAG_BUFFERED;
+    } else {
+        default_log_state_flags &= ~QEMU_LOG_INSTR_FLAG_BUFFERED;
     }
 }
 
@@ -1693,6 +1704,21 @@ void qemu_log_instr_flush(CPUArchState *env)
         curr = (curr + 1) % cpulog->instr_info->len;
     }
     cpulog->ring_tail = cpulog->ring_head;
+}
+
+static void do_cpu_buffer_flush(CPUState *cpu, run_on_cpu_data data)
+{
+    qemu_log_instr_flush(cpu->env_ptr);
+}
+
+/* Flush the log buffer for all CPUs */
+void qemu_log_instr_flush_all()
+{
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu) {
+        async_safe_run_on_cpu(cpu, do_cpu_buffer_flush, RUN_ON_CPU_NULL);
+    }
 }
 
 void qemu_log_instr_initcpu_mode(CPUArchState *env, qemu_log_instr_cpu_mode_t cpu_mode)

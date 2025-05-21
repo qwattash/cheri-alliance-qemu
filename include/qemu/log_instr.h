@@ -159,8 +159,20 @@ int qemu_log_instr_global_switch(int log_flags);
  * Update the ring buffer size.
  * Note that this does not guarantee that the existing buffered 
  * entries will be retained.
+ * Safe to call outside of the CPU main loop.
  */
 void qemu_log_instr_set_buffer_size(unsigned long buffer_size);
+
+/*
+ * Flush all trace buffers, if buffered mode tracing is enabled.
+ * Safe to call outside of the CPU main loop.
+ */
+void qemu_log_instr_flush_all(void);
+
+/*
+ * Enable buffered mode on startup.
+ */
+void qemu_log_instr_set_buffered_mode(bool enable);
 
 #else /* ! CONFIG_TCG_LOG_INSTR */
 #define qemu_log_instr_set_format(fmt) ((void)0)
