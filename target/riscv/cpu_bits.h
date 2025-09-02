@@ -581,9 +581,11 @@ typedef enum {
 #define PTE_D               0x080 /* Dirty */
 #define PTE_SOFT            0x300 /* Reserved for Software */
 #if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
-#ifdef TARGET_CHERI_RISCV_STD
-#define PTE_CRG BIT_ULL(59) /* Cap Read Generation */
-#define PTE_CW  BIT_ULL(60) /* Cap Write */
+#if defined(TARGET_CHERI_RISCV_STD)
+#define PTE_CRG BIT_ULL(57) /* Cap Read Generation */
+#define PTE_CRW BIT_ULL(58) /* Cap Read-Write */
+#define PTE_CD BIT_ULL(56)  /* Cap Dirty */
+#define PTE_CW PTE_CRW      /* CRW implies CW */
 #else
 #define PTE_CRG             0x0800000000000000 /* Cap Read Generation */
 #define PTE_CRM             0x1000000000000000 /* Cap Read Modifier */

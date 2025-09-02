@@ -541,7 +541,12 @@ static void pte_print(target_ulong pte, int level)
     qemu_log_mask(
         CPU_LOG_MMU, "PTE - " TARGET_FMT_lx " %s%s%s%s%s%s%s%s%s%s %d\n", pte,
 #if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
-        pte & PTE_CRG ? "CRG" : "", pte & PTE_CW ? "CW" : "",
+        pte & PTE_CRG ? "CRG" : "",
+#if defined(TARGET_CHERI_RISCV_STD)
+        pte & PTE_CRW ? "CRW" : "",
+#else
+        pte & PTE_CW ? "CW" : "",
+#endif
 #else
         "", "",
 #endif
@@ -797,10 +802,10 @@ restart:
             return TRANSLATE_FAIL;
         } else if (!(pte & (PTE_R | PTE_W | PTE_X))) {
             /* Inner PTE, continue walking */
-#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
-            if(pte & PTE_CW){
+#if defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+            if ((pte & PTE_CRW) == PTE_CRW) {
                 // This bit set on a leaf node is illegal regardless of cheripte
-                qemu_log_mask(CPU_LOG_MMU, "%s Translate fail: Reserved CW set\n",
+                qemu_log_mask(CPU_LOG_MMU, "%s Translate fail: Reserved CRW set\n",
                             __func__);
                 return TRANSLATE_FAIL;
             }
@@ -820,7 +825,13 @@ restart:
                           __func__);
             return_code = TRANSLATE_FAIL;
         }
-#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32) && !defined(TARGET_CHERI_RISCV_STD)
+#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
+#if defined(TARGET_CHERI_RISCV_STD)
+        if (!(pte & PTE_CRW) && (pte & (PTE_CRG | PTE_CD))) {
+            /* Reserved CHERI-extended PTE flags: no CRW but CRG or CD set */
+            return_code = TRANSLATE_FAIL;
+        }
+#else
         if ((pte & (PTE_CR | PTE_CRG)) == PTE_CRG) {
             /* Reserved CHERI-extended PTE flags: no CR but CRG */
             return_code = TRANSLATE_FAIL;
@@ -829,6 +840,7 @@ restart:
             /* Reserved CHERI-extended PTE flags: CR and no CRM but CRG */
             return_code = TRANSLATE_FAIL;
         }
+#endif
 #endif
         if ((pte & PTE_U) &&
             ((mode != PRV_U) && (!sum || access_type == MMU_INST_FETCH))) {
@@ -934,7 +946,7 @@ restart:
             if (access_type == MMU_DATA_STORE) {
                 updated_pte |= PTE_D;
             }
-#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32) && !defined(TARGET_CHERI_RISCV_STD)
+#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
             if (access_type == MMU_DATA_CAP_STORE) {
                 updated_pte |= PTE_CD;
             }
@@ -1007,28 +1019,11 @@ restart:
             bool status_ucrg = (env->mstatus & SSTATUS64_UCRG);
 
             if (cpu->cfg.cheri_pte) {
-                if (!(pte & PTE_CW)) {
-                    /* CW inhibited */
+                if (!(pte & PTE_CRW)) {
                     *prot |= PAGE_LC_CLEAR;
+                    *prot |= PAGE_SC_TRAP;
                 } else if ((pte & PTE_U) && (status_ucrg != pte_crg)) {
                     *prot |= PAGE_LC_TRAP;
-                }
-
-                if (!(pte & PTE_CW)) {
-                    if (pte_crg) {
-                        /*  Page fault or update!
-                            For now treat the cheri_pte_svadu param as if it
-                           were the ADUE bit in the envcfg. When we merge in
-                            upstream with svadu support we will update this.
-                        */
-
-                        // no implementation provided bit manipulation
-                        // so take a trap
-                        *prot |= PAGE_SC_TRAP;
-                    } else {
-                        // no cw or crg, so trap
-                        *prot |= PAGE_SC_TRAP;
-                    }
                 }
             }
             /* TODO: We probably shouldn't update the PTE's if we are going to
