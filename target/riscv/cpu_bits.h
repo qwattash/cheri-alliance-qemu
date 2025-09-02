@@ -573,7 +573,7 @@
 #define MSTATUS64_SD        0x8000000000000000ULL
 #define MSTATUSH128_SD      0x8000000000000000ULL
 
-#if defined(TARGET_CHERI_RISCV_STD_093)
+#if defined(TARGET_CHERI_RISCV_STD)
 #define MSTATUS64_UCRG      BIT_ULL(61)
 #endif
 
@@ -608,7 +608,7 @@ typedef enum {
 #define SSTATUS32_SD        0x80000000
 #define SSTATUS64_SD        0x8000000000000000ULL
 
-#if defined(TARGET_CHERI_RISCV_STD_093)
+#if defined(TARGET_CHERI_RISCV_STD)
 #define SSTATUS64_UCRG      BIT_ULL(61)
 #endif
 
@@ -687,16 +687,17 @@ typedef enum {
 #define PTE_ATTR            (PTE_N | PTE_PBMT) /* All attributes bits */
 #endif
 #if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
-#define PTE_CRG             0x0800000000000000 /* Cap Read Generation */
-#define PTE_CRM             0x1000000000000000 /* Cap Read Modifier */
-#define PTE_CD              0x2000000000000000 /* Cap Dirty */
-#define PTE_CR              0x4000000000000000 /* Cap Read */
-#define PTE_CW              0x8000000000000000 /* Cap Write */
+#define PTE_CRG             BIT_ULL(59) /* Cap Read Generation */
+#define PTE_CRM             BIT_ULL(60) /* Cap Read Modifier */
+#define PTE_CD              BIT_ULL(61) /* Cap Dirty */
+#define PTE_CR              BIT_ULL(62) /* Cap Read */
+#define PTE_CW              BIT_ULL(63) /* Cap Write */
 #define PTE_RESERVED 0x07C0000000000000ULL /* Reserved bits */
-#elif defined(TARGET_CHERI_RISCV_STD_093) && !defined(TARGET_RISCV32)
-#define PTE_CRG BIT_ULL(59) /* Cap Read Generation */
-#define PTE_CW  BIT_ULL(60) /* Cap Write */
-#define PTE_RESERVED 0x040000000000000ULL /* Reserved bits */
+#elif defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+#define PTE_CD              BIT_ULL(56) /* Cap Dirty */
+#define PTE_CRG             BIT_ULL(57) /* Cap Read Generation */
+#define PTE_CRW             BIT_ULL(58) /* Cap Write */
+#define PTE_RESERVED 0x18C0000000000000ULL /* Reserved bits */
 #else
 #define PTE_RESERVED 0x1FC0000000000000ULL /* Reserved bits */
 #endif

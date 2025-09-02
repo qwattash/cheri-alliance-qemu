@@ -855,7 +855,12 @@ static void pte_print(target_ulong pte, int level)
     qemu_log_mask(
         CPU_LOG_MMU, "PTE - " TARGET_FMT_lx " %s%s%s%s%s%s%s%s%s%s %d\n", pte,
 #if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
-        pte & PTE_CRG ? "CRG" : "", pte & PTE_CW ? "CW" : "",
+        pte & PTE_CRG ? "CRG" : "",
+#if defined(TARGET_CHERI_RISCV_STD)
+        pte & PTE_CRW ? "CRW" : "",
+#else
+        pte & PTE_CW ? "CW" : "",
+#endif
 #else
         "", "",
 #endif
@@ -1131,11 +1136,11 @@ restart:
 #endif
         } else if (!(pte & (PTE_R | PTE_W | PTE_X))) {
             /* Inner PTE, continue walking */
-#if defined(TARGET_CHERI_RISCV_STD_093) && !defined(TARGET_RISCV32)
-            if (pte & PTE_CW) {
+#if defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+            if ((pte & PTE_CRW) == PTE_CRW) {
                 /* This bit on a leaf node is illegal regardless of cheripte */
                 qemu_log_mask(CPU_LOG_MMU,
-                              "%s Translate fail: Reserved CW set\n", __func__);
+                              "%s Translate fail: Reserved CRW set\n", __func__);
                 return TRANSLATE_FAIL;
             }
 #endif
@@ -1162,6 +1167,10 @@ restart:
             return TRANSLATE_CHERI_FAIL;
         } else if ((pte & (PTE_CR | PTE_CRM | PTE_CRG)) == (PTE_CR | PTE_CRG)) {
             /* Reserved CHERI-extended PTE flags: CR and no CRM but CRG */
+            return TRANSLATE_CHERI_FAIL;
+#elif defined(TARGET_CHERI_STD) && !defined(TARGET_RISCV32)
+        } else if (!(pte & PTE_CRW) && (pte & (PTE_CRG | PTE_CD))) {
+            /* Reserved CHERI-extended PTE flags: no CRW but CRG or CD set */
             return TRANSLATE_CHERI_FAIL;
 #endif
         } else if ((pte & PTE_U) && ((mode != PRV_U) &&
@@ -1203,15 +1212,19 @@ restart:
             qemu_log_mask(CPU_LOG_MMU, "%s Translate fail: X bit not set\n",
                           __func__);
             return TRANSLATE_FAIL;
-#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
-        } else if (access_type == MMU_DATA_CAP_STORE && !(pte & PTE_CW)
-#if defined(TARGET_CHERI_RISCV_STD_093)
-                   && cpu->cfg.cheri_pte
-#endif
-        ) {
+#if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
+        } else if (access_type == MMU_DATA_CAP_STORE && !(pte & PTE_CW)) {
             /* CW inhibited */
             qemu_log_mask(CPU_LOG_MMU,
                           "%s Translate fail: CW bit not set on level %d\n",
+                          __func__, i);
+            return TRANSLATE_CHERI_FAIL;
+#elif defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+        } else if (access_type == MMU_DATA_CAP_STORE && !(pte & PTE_CRW)
+                   && cpu->cfg.cheri_pte) {
+            /* CRW inhibits cap store */
+            qemu_log_mask(CPU_LOG_MMU,
+                          "%s Translate fail: CRW bit not set on level %d\n",
                           __func__, i);
             return TRANSLATE_CHERI_FAIL;
 #endif
@@ -1248,6 +1261,7 @@ restart:
             target_ulong updated_pte = pte | PTE_A;
             switch (access_type) {
 #if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
+            /* XXX-AM: Handle CHERI STD when we merge svadu support */
             case MMU_DATA_CAP_STORE:
                 updated_pte |= PTE_CD;
                 QEMU_FALLTHROUGH;
@@ -1329,6 +1343,7 @@ restart:
                  (access_type == MMU_DATA_CAP_STORE) || (pte & PTE_D))) {
                 *prot |= PAGE_WRITE;
             }
+
 #if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
             if ((pte & PTE_CR) == 0) {
                 if ((pte & PTE_CRM) == 0) {
@@ -1352,29 +1367,29 @@ restart:
             if ((pte & PTE_CW) == 0) {
                 *prot |= PAGE_SC_TRAP;
             }
-#elif defined(TARGET_CHERI_RISCV_STD_093) && !defined(TARGET_RISCV32)
+#elif defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
             bool pte_crg = (pte & PTE_CRG);
             bool status_ucrg = (env->mstatus & SSTATUS64_UCRG);
             /* TODO: Probably shouldn't update the TLB if we are trapping */
             if (cpu->cfg.cheri_pte) {
-                if (!(pte & PTE_CW)) {
-                    /* CW inhibited */
+                if ((pte & PTE_CRW) == 0) {
+                    /* Always tag clearing */
                     *prot |= PAGE_LC_CLEAR;
                 } else if ((pte & PTE_U) && (status_ucrg != pte_crg)) {
                     *prot |= PAGE_LC_TRAP;
                 }
 
-                if (!(pte & PTE_CW)) {
-                    if (pte_crg) {
+                if ((pte & PTE_CRW)) {
+                    if ((pte & PTE_CD) == 0) {
                         /*
                          * Page fault or update. Trap for now, when we merge in
                          * upstream with svadu support we will update this.
                          */
                         *prot |= PAGE_SC_TRAP;
-                    } else {
-                        /* No cw or crg, so trap. */
-                        *prot |= PAGE_SC_TRAP;
                     }
+                } else {
+                    /* No CRW, so trap. */
+                    *prot |= PAGE_SC_TRAP;
                 }
             }
 #endif
