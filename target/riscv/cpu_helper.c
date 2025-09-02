@@ -820,6 +820,16 @@ restart:
                           __func__);
             return_code = TRANSLATE_FAIL;
         }
+#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32) && !defined(TARGET_CHERI_RISCV_STD)
+        if ((pte & (PTE_CR | PTE_CRG)) == PTE_CRG) {
+            /* Reserved CHERI-extended PTE flags: no CR but CRG */
+            return_code = TRANSLATE_FAIL;
+        }
+        if ((pte & (PTE_CR | PTE_CRM | PTE_CRG)) == (PTE_CR | PTE_CRG)) {
+            /* Reserved CHERI-extended PTE flags: CR and no CRM but CRG */
+            return_code = TRANSLATE_FAIL;
+        }
+#endif
         if ((pte & PTE_U) &&
             ((mode != PRV_U) && (!sum || access_type == MMU_INST_FETCH))) {
             /* User PTE flags when not U mode and mstatus.SUM is not set,
@@ -901,8 +911,15 @@ restart:
             return_code = TRANSLATE_FAIL;
         }
 #endif
+#if RISCV_PTE_TRAPPY && defined(PTE_CD)
+        if (access_type == MMU_DATA_CAP_STORE && !(pte & PTE_CD)) {
+            /* CD clear; force the software trap handler to get involved */
+            qemu_log_mask(CPU_LOG_MMU, "%s Translate fail: CD not set\n",
+                          __func__);
+            return_code = TRANSLATE_FAIL;
+        }
 #endif
-#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
+
         if (pte_cheri_error) {
             return (return_code == TRANSLATE_FAIL ? TRANSLATE_FAIL_CHERI_FAIL
                                                   : TRANSLATE_CHERI_FAIL);
@@ -917,6 +934,11 @@ restart:
             if (access_type == MMU_DATA_STORE) {
                 updated_pte |= PTE_D;
             }
+#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32) && !defined(TARGET_CHERI_RISCV_STD)
+            if (access_type == MMU_DATA_CAP_STORE) {
+                updated_pte |= PTE_CD;
+            }
+#endif
 
             /* Page table updates need to be atomic with MTTCG enabled */
             if (updated_pte != pte) {
@@ -980,6 +1002,8 @@ restart:
             }
 #if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
             bool pte_crg = (pte & PTE_CRG);
+
+#if defined(TARGET_CHERI_RISCV_STD)
             bool status_ucrg = (env->mstatus & SSTATUS64_UCRG);
 
             if (cpu->cfg.cheri_pte) {
@@ -1008,7 +1032,31 @@ restart:
                 }
             }
             /* TODO: We probably shouldn't update the PTE's if we are going to
-             * take trap*/
+             * take trap */
+#else
+            if ((pte & PTE_CR) == 0) {
+                if ((pte & PTE_CRM) == 0) {
+                    *prot |= PAGE_LC_CLEAR;
+                } else {
+                    *prot |= PAGE_LC_TRAP;
+                }
+            } else {
+                if (pte & PTE_CRM) {
+                    /* Cap-loads checked against [SU]GCLG in CCSR using PTE_U */
+                    target_ulong gclgmask =
+                        (pte & PTE_U) ? SCCSR_UGCLG : SCCSR_SGCLG;
+                    bool gclg = (env->sccsr & gclgmask) != 0;
+                    bool lclg = pte_crg != 0;
+
+                    if (gclg != lclg) {
+                        *prot |= PAGE_LC_TRAP;
+                    }
+                }
+            }
+            if ((pte & PTE_CW) == 0) {
+                *prot |= PAGE_SC_TRAP;
+            }
+#endif
 #endif
             return TRANSLATE_SUCCESS;
         }
