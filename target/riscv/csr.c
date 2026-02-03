@@ -1725,6 +1725,10 @@ static RISCVException write_sstatus(CPURISCVState *env, int csrno,
         }
     }
     target_ulong newval = (env->mstatus & ~mask) | (val & mask);
+#if defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+    qemu_log_mask(CPU_LOG_MMU, "XXX sstatus.CRG=%d\n",
+                  (newval & SSTATUS64_UCRG) != 0);
+#endif
     return write_mstatus(env, CSR_MSTATUS, newval);
 }
 

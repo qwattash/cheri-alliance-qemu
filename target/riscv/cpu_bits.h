@@ -575,6 +575,7 @@
 
 #if defined(TARGET_CHERI_RISCV_STD)
 #define MSTATUS64_UCRG      BIT_ULL(61)
+#define MSTATUS64_CRGE      BIT_ULL(60)
 #endif
 
 #define MISA32_MXL          0xC0000000
@@ -610,6 +611,7 @@ typedef enum {
 
 #if defined(TARGET_CHERI_RISCV_STD)
 #define SSTATUS64_UCRG      BIT_ULL(61)
+#define SSTATUS64_CRGE      BIT_ULL(60)
 #endif
 
 /* hstatus CSR bits */

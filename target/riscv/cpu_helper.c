@@ -1372,24 +1372,34 @@ restart:
             bool status_ucrg = (env->mstatus & SSTATUS64_UCRG);
             /* TODO: Probably shouldn't update the TLB if we are trapping */
             if (cpu->cfg.cheri_pte) {
-                if ((pte & PTE_CRW) == 0) {
-                    /* Always tag clearing */
-                    *prot |= PAGE_LC_CLEAR;
-                } else if ((pte & PTE_U) && (status_ucrg != pte_crg)) {
-                    *prot |= PAGE_LC_TRAP;
-                }
-
-                if ((pte & PTE_CRW)) {
-                    if ((pte & PTE_CD) == 0) {
-                        /*
-                         * Page fault or update. Trap for now, when we merge in
-                         * upstream with svadu support we will update this.
-                         */
-                        *prot |= PAGE_SC_TRAP;
+                if ((env->mstatus & SSTATUS64_CRGE) == 0) {
+                    if ((pte & PTE_CRW) == 0) {
+                        *prot |= PAGE_LC_CLEAR | PAGE_SC_TRAP;
                     }
                 } else {
-                    /* No CRW, so trap. */
-                    *prot |= PAGE_SC_TRAP;
+                    /* Load side */
+                    if ((pte & PTE_CRW) == 0) {
+                        *prot |= PAGE_LC_CLEAR;
+                    } else if ((pte & PTE_U) && (status_ucrg != pte_crg)) {
+                        *prot |= PAGE_LC_TRAP;
+                        qemu_log_mask(CPU_LOG_MMU,
+                                      "%s CHERI translate %#lx LC_TRAP crg=%d\n",
+                                      __func__ , (uint64_t)addr, status_ucrg);
+                    }
+                    /* Store side */
+                    if ((pte & PTE_CRW)) {
+                        if ((pte & PTE_CD) == 0) {
+                            /*
+                             * Page fault or update. Trap for now, when we merge
+                             * in upstream with svadu support we will update
+                             * this.
+                             */
+                            *prot |= PAGE_SC_TRAP;
+                        }
+                    } else {
+                        /* No CRW, so trap. */
+                        *prot |= PAGE_SC_TRAP;
+                    }
                 }
             }
 #endif
