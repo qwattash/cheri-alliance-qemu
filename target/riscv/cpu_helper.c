@@ -497,8 +497,8 @@ void riscv_cpu_swap_hypervisor_regs(CPURISCVState *env, bool hs_mode_trap)
         mstatus_mask |= MSTATUS_FS;
     }
     bool current_virt = riscv_cpu_virt_enabled(env);
-#if defined(TARGET_CHERI_RISCV_STD)
-    mstatus_mask |= MSTATUS64_UCRG;
+#if defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+    mstatus_mask |= MSTATUS64_YRGE | MSTATUS64_UYRG | MSTATUS64_SYRG;
 #endif
     g_assert(riscv_has_ext(env, RVH));
 
@@ -806,6 +806,23 @@ extern bool rvfi_debug_output;
 #define RISCV_PTE_TRAPPY 0
 #endif
 
+#if defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+static inline bool riscv_svyrg_enabled(CPURISCVState *env)
+{
+    /*
+     * XXX-AM: I think the cheri_pte should be removed, instead it should
+     * depend on whether S-mode virtual memory is implemented at all.
+     */
+    return (env_archcpu(env)->cfg.cheri_pte &&
+            (env->mstatus & MSTATUS64_YRGE) != 0);
+}
+#elif defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
+static inline bool riscv_svyrg_enabled(CPURISCVState *env)
+{
+    return (true);
+}
+#endif
+
 /*
  * get_physical_address_pmp - check PMP permission for this physical address
  *
@@ -855,7 +872,7 @@ static void pte_print(target_ulong pte, int level)
     qemu_log_mask(
         CPU_LOG_MMU, "PTE - " TARGET_FMT_lx " %s%s%s%s%s%s%s%s%s%s %d\n", pte,
 #if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
-        pte & PTE_CRG ? "CRG" : "", pte & PTE_CW ? "CW" : "",
+        pte & PTE_YRG ? "YRG" : "", pte & PTE_YW ? "YW" : "",
 #else
         "", "",
 #endif
@@ -1131,11 +1148,12 @@ restart:
 #endif
         } else if (!(pte & (PTE_R | PTE_W | PTE_X))) {
             /* Inner PTE, continue walking */
-#if defined(TARGET_CHERI_RISCV_STD_093) && !defined(TARGET_RISCV32)
-            if (pte & PTE_CW) {
+#if defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+            /* XXX-AM does this need to check cfg.cheri_pte? */
+            if (pte & PTE_YRW) {
                 /* This bit on a leaf node is illegal regardless of cheripte */
                 qemu_log_mask(CPU_LOG_MMU,
-                              "%s Translate fail: Reserved CW set\n", __func__);
+                              "%s Translate fail: Reserved YRW set\n", __func__);
                 return TRANSLATE_FAIL;
             }
 #endif
@@ -1157,11 +1175,11 @@ restart:
                           __func__);
             return TRANSLATE_FAIL;
 #if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
-        } else if ((pte & (PTE_CR | PTE_CRG)) == PTE_CRG) {
-            /* Reserved CHERI-extended PTE flags: no CR but CRG */
+        } else if ((pte & (PTE_YR | PTE_YRG)) == PTE_YRG) {
+            /* Reserved CHERI-extended PTE flags: no YR but YRG */
             return TRANSLATE_CHERI_FAIL;
-        } else if ((pte & (PTE_CR | PTE_CRM | PTE_CRG)) == (PTE_CR | PTE_CRG)) {
-            /* Reserved CHERI-extended PTE flags: CR and no CRM but CRG */
+        } else if ((pte & (PTE_YR | PTE_CRM | PTE_YRG)) == (PTE_YR | PTE_YRG)) {
+            /* Reserved CHERI-extended PTE flags: YR and no CRM but YRG */
             return TRANSLATE_CHERI_FAIL;
 #endif
         } else if ((pte & PTE_U) && ((mode != PRV_U) &&
@@ -1204,14 +1222,20 @@ restart:
                           __func__);
             return TRANSLATE_FAIL;
 #if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
-        } else if (access_type == MMU_DATA_CAP_STORE && !(pte & PTE_CW)
-#if defined(TARGET_CHERI_RISCV_STD_093)
-                   && cpu->cfg.cheri_pte
-#endif
-        ) {
-            /* CW inhibited */
+        } else if (access_type == MMU_DATA_CAP_STORE && riscv_svyrg_enabled(env)
+                   && !(pte & PTE_YW)) {
+            /* YW inhibited */
             qemu_log_mask(CPU_LOG_MMU,
                           "%s Translate fail: CW bit not set on level %d\n",
+                          __func__, i);
+            return TRANSLATE_CHERI_FAIL;
+#endif
+#if defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+        } else if (access_type == MMU_DATA_CAP_STORE && !riscv_svyrg_enabled(env)
+                   && !(pte & PTE_YRW)) {
+            /* YRW inhibited */
+            qemu_log_mask(CPU_LOG_MMU,
+                          "%s Translate fail: YRW bit not set on level %d\n",
                           __func__, i);
             return TRANSLATE_CHERI_FAIL;
 #endif
@@ -1237,8 +1261,9 @@ restart:
                           __func__);
             return TRANSLATE_FAIL;
 #endif
-#if defined(TARGET_CHERI_RISCV_V9) && RISCV_PTE_TRAPPY
-        } else if (access_type == MMU_DATA_CAP_STORE && !(pte & PTE_CD)) {
+#if defined(TARGET_CHERI) && RISCV_PTE_TRAPPY
+        } else if (access_type == MMU_DATA_CAP_STORE && riscv_svyrg_enabled(env)
+                   && !(pte & PTE_YD)) {
             /* CD clear; force the software trap handler to get involved */
             return TRANSLATE_CHERI_FAIL;
 #endif
@@ -1247,9 +1272,11 @@ restart:
             /* if necessary, set accessed and dirty bits. */
             target_ulong updated_pte = pte | PTE_A;
             switch (access_type) {
-#if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
+#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
             case MMU_DATA_CAP_STORE:
-                updated_pte |= PTE_CD;
+                if (riscv_svyrg_enabled(env)) {
+                    updated_pte |= PTE_YD;
+                }
                 QEMU_FALLTHROUGH;
 #endif
             case MMU_DATA_STORE:
@@ -1329,52 +1356,44 @@ restart:
                  (access_type == MMU_DATA_CAP_STORE) || (pte & PTE_D))) {
                 *prot |= PAGE_WRITE;
             }
-#if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
-            if ((pte & PTE_CR) == 0) {
-                if ((pte & PTE_CRM) == 0) {
-                    *prot |= PAGE_LC_CLEAR;
-                } else {
-                    *prot |= PAGE_LC_TRAP;
-                }
-            } else {
-                if (pte & PTE_CRM) {
-                    /* Cap-loads checked against [SU]GCLG in CCSR using PTE_U */
-                    target_ulong gclgmask =
-                        (pte & PTE_U) ? SCCSR_UGCLG : SCCSR_SGCLG;
-                    bool gclg = (env->sccsr & gclgmask) != 0;
-                    bool lclg = (pte & PTE_CRG) != 0;
 
-                    if (gclg != lclg) {
+#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
+            if (riscv_svyrg_enabled(env)) {
+                /* Load-side table */
+                if ((pte & PTE_YR) == 0) {
+#if defined(TARGET_CHERI_RISCV_V9)
+                    if (pte & PTE_CRM) {
+                        *prot |= PAGE_LC_TRAP;
+                    } else
+#endif
+                    if ((pte & PTE_YRG) == 0) {
+                        *prot |= PAGE_LC_CLEAR;
+                    }
+                    /* Normal operation otherwise */
+                } else {
+                    const bool pte_yrg = (pte & PTE_YRG) != 0;
+#if defined(TARGET_CHERI_RISCV_V9)
+                    const target_ulong yrg_mask =
+                        (pte & PTE_U) ? SCCSR_UGCLG : SCCSR_SGCLG;
+                    const bool yrg = (env->sccsr & yrg_mask) != 0;
+
+                    if (pte_yrg != yrg && (pte & PTE_CRM) != 0) {
                         *prot |= PAGE_LC_TRAP;
                     }
-                }
-            }
-            if ((pte & PTE_CW) == 0) {
-                *prot |= PAGE_SC_TRAP;
-            }
-#elif defined(TARGET_CHERI_RISCV_STD_093) && !defined(TARGET_RISCV32)
-            bool pte_crg = (pte & PTE_CRG);
-            bool status_ucrg = (env->mstatus & SSTATUS64_UCRG);
-            /* TODO: Probably shouldn't update the TLB if we are trapping */
-            if (cpu->cfg.cheri_pte) {
-                if (!(pte & PTE_CW)) {
-                    /* CW inhibited */
-                    *prot |= PAGE_LC_CLEAR;
-                } else if ((pte & PTE_U) && (status_ucrg != pte_crg)) {
-                    *prot |= PAGE_LC_TRAP;
+#elif defined(TARGET_CHERI_RISCV_STD)
+                    const target_ulong yrg_mask =
+                        (pte & PTE_U) ? MSTATUS64_UYRG : MSTATUS64_SYRG;
+                    const bool yrg = (env->mstatus & yrg_mask) != 0;
+                    if (pte_yrg != yrg) {
+                        *prot |= PAGE_LC_TRAP;
+                    }
+#endif
+                    /* Normal operation otherwise */
                 }
 
-                if (!(pte & PTE_CW)) {
-                    if (pte_crg) {
-                        /*
-                         * Page fault or update. Trap for now, when we merge in
-                         * upstream with svadu support we will update this.
-                         */
-                        *prot |= PAGE_SC_TRAP;
-                    } else {
-                        /* No cw or crg, so trap. */
-                        *prot |= PAGE_SC_TRAP;
-                    }
+                /* Store-side table, YD has already been taken care of */
+                if ((pte & PTE_YW) == 0) {
+                    *prot |= PAGE_SC_TRAP;
                 }
             }
 #endif

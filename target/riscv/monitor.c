@@ -66,10 +66,11 @@ static void print_pte(Monitor *mon, int va_bits, target_ulong vaddr,
 
     monitor_printf(mon, TARGET_FMT_lx " " TARGET_FMT_plx " " TARGET_FMT_lx
                    " %c%c%c%c%c%c%c"
-#if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
-                   "%c%c%c%c%c"
-#elif defined(TARGET_CHERI_RISCV_STD_093) && !defined(TARGET_RISCV32)
-                   "%c%c"
+#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
+                   "%c%c%c%c"
+#if defined(TARGET_CHERI_RISCV_V9)
+                   "%c"
+#endif
 #endif
                    "\n",
                    addr_canonical(va_bits, vaddr),
@@ -83,13 +84,13 @@ static void print_pte(Monitor *mon, int va_bits, target_ulong vaddr,
                    attr & PTE_D ? 'd' : '-'
 #if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
                    ,
-                   attr & PTE_CRG ? 'G' : '-',
+                   attr & PTE_YRG ? 'G' : '-',
 #if defined(TARGET_CHERI_RISCV_V9)
                    attr & PTE_CRM ? 'M' : '-',
-                   attr & PTE_CD  ? 'D' : '-',
-                   attr & PTE_CR  ? 'R' : '-',
 #endif
-                   attr & PTE_CW  ? 'W' : '-'
+                   attr & PTE_YD  ? 'D' : '-',
+                   attr & PTE_YR  ? 'R' : '-',
+                   attr & PTE_YW  ? 'W' : '-'
 #endif
         );
 }
@@ -119,10 +120,10 @@ static void walk_pte(Monitor *mon, hwaddr base, target_ulong start,
         cpu_physical_memory_read(pte_addr, &pte, ptesize);
 
         paddr = (hwaddr)(pte >> PTE_PPN_SHIFT) << PGSHIFT;
-#if defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
-        attr = pte & (PTE_CR | PTE_CW | PTE_CD | PTE_CRM | PTE_CRG | 0xff);
-#elif defined(TARGET_CHERI_RISCV_STD_093) && !defined(TARGET_RISCV32)
-        attr = pte & (PTE_CW | PTE_CRG | 0xff);
+#if defined(TARGET_CHERI_RISCV_STD) && !defined(TARGET_RISCV32)
+        attr = pte & (PTE_YR | PTE_YW | PTE_YD | PTE_YRG | 0xff);
+#elif defined(TARGET_CHERI_RISCV_V9) && !defined(TARGET_RISCV32)
+        attr = pte & (PTE_YR | PTE_YW | PTE_YD | PTE_CRM | PTE_YRG | 0xff);
 #else
         attr = pte & 0xff;
 #endif
